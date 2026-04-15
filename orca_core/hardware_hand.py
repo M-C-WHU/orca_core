@@ -142,6 +142,13 @@ class OrcaHand(BaseHand):
                 self.config.motor_ids, self.config.port, self.config.baudrate
             )
 
+        if self.config.motor_type == "waveshare":
+            from .hardware.waveshare_client import WaveShareClient
+
+            return WaveShareClient(
+                self.config.motor_ids, self.config.port, self.config.baudrate
+            )
+
         raise ValueError(
             f"Unknown motor_type: {self.config.motor_type}. Expected one of [{', '.join(SUPPORTED_MOTOR_TYPES)}]."
         )

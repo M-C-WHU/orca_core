@@ -7,7 +7,7 @@ MOTOR_LIMITS_DICT = "motor_limits"
 MOTOR_TO_JOINT_DICT = "motor_to_joint"
 MOTOR_TO_JOINT_RATIOS_DICT = "motor_to_joint_ratios"
 MOTOR_TO_JOINT_RATIOS_DICT = "motor_to_joint_ratios"
-SUPPORTED_MOTOR_TYPES = ["dynamixel", "feetech"]
+SUPPORTED_MOTOR_TYPES = ["dynamixel", "feetech", "waveshare"]
 JOINT_TO_MOTOR_RATIOS = "joint_to_motor_ratios"
 DEFAULT_MODEL_NAME = "orcahand_right"
 
@@ -19,6 +19,11 @@ KNOWN_VIDS: dict[str, list[int]] = {
     "feetech": [
         0x1A86,  # QinHeng Electronics CH340 (most Feetech USB adapters)
         0x10C4,  # Silicon Labs CP210x (some Feetech boards)
+    ],
+    "waveshare": [
+        0x1A86,  # QinHeng Electronics CH340 (common for Chinese servos)
+        0x10C4,  # Silicon Labs CP210x
+        0x0403,  # FTDI (also common)
     ],
 }
 
