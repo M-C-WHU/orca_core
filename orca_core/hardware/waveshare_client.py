@@ -271,31 +271,31 @@ class WaveShareClient(MotorClient):
         
         for i, motor_id in enumerate(self.motor_ids):
             # Read position (2 bytes)
-            pos_result, pos_error = self.packet_handler.read2ByteTxRx(
+            pos_data, pos_result, pos_error = self.packet_handler.read2ByteTxRx(
                 motor_id, SMS_STS_PRESENT_POSITION_L
             )
             if pos_result == COMM_SUCCESS and pos_error == 0:
                 # Convert from raw units to radians
-                raw_pos = pos_result if pos_result <= 4095 else pos_result - 65536
+                raw_pos = pos_data if pos_data <= 4095 else pos_data - 65536
                 positions[i] = raw_pos * self.pos_scale
             
             # Read velocity (2 bytes)
-            vel_result, vel_error = self.packet_handler.read2ByteTxRx(
+            vel_data, vel_result, vel_error = self.packet_handler.read2ByteTxRx(
                 motor_id, SMS_STS_PRESENT_SPEED_L
             )
             if vel_result == COMM_SUCCESS and vel_error == 0:
                 # Convert from raw units to rad/s
                 # Velocity is signed: positive = CCW, negative = CW
-                raw_vel = vel_result if vel_result <= 32767 else vel_result - 65536
+                raw_vel = vel_data if vel_data <= 32767 else vel_data - 65536
                 velocities[i] = raw_vel * self.vel_scale
             
             # Read current (2 bytes)
-            cur_result, cur_error = self.packet_handler.read2ByteTxRx(
+            cur_data, cur_result, cur_error = self.packet_handler.read2ByteTxRx(
                 motor_id, SMS_STS_PRESENT_CURRENT_L
             )
             if cur_result == COMM_SUCCESS and cur_error == 0:
                 # Convert from raw units to mA
-                currents[i] = cur_result * self.cur_scale
+                currents[i] = cur_data * self.cur_scale
         
         return positions, velocities, currents
 
@@ -310,11 +310,11 @@ class WaveShareClient(MotorClient):
         temperatures = np.zeros(len(self.motor_ids), dtype=np.float32)
         
         for i, motor_id in enumerate(self.motor_ids):
-            result, error = self.packet_handler.read1ByteTxRx(
+            data, result, error = self.packet_handler.read1ByteTxRx(
                 motor_id, SMS_STS_PRESENT_TEMPERATURE
             )
             if result == COMM_SUCCESS and error == 0:
-                temperatures[i] = result  # Temperature in degrees Celsius
+                temperatures[i] = data  # Temperature in degrees Celsius
         
         return temperatures
 
@@ -342,7 +342,7 @@ class WaveShareClient(MotorClient):
             raw_pos = max(POS_MIN, min(POS_MAX, raw_pos))
             
             # Write position with default speed and acceleration
-            result, error = self.packet_handler.writePos(
+            result, error = self.packet_handler.WritePosEx(
                 motor_id,
                 raw_pos,
                 self._default_speed,
@@ -417,14 +417,14 @@ class WaveShareClient(MotorClient):
         self._check_connected()
         
         # Read current position
-        result, error = self.packet_handler.read2ByteTxRx(
+        data, result, error = self.packet_handler.read2ByteTxRx(
             motor_id, SMS_STS_PRESENT_POSITION_L
         )
         
         if result == COMM_SUCCESS and error == 0:
             logging.info(
                 'Motor %d offset calibration: current position = %d (setting as %s bound)',
-                motor_id, result, 'upper' if upper else 'lower'
+                motor_id, data, 'upper' if upper else 'lower'
             )
             return True
         
