@@ -142,6 +142,13 @@ class OrcaHand(BaseHand):
                 self.config.motor_ids, self.config.port, self.config.baudrate
             )
 
+        if self.config.motor_type == "waveshare":
+            from .hardware.waveshare_client import WaveShareClient
+
+            return WaveShareClient(
+                self.config.motor_ids, self.config.port, self.config.baudrate
+            )
+
         raise ValueError(
             f"Unknown motor_type: {self.config.motor_type}. Expected one of [{', '.join(SUPPORTED_MOTOR_TYPES)}]."
         )
@@ -1149,9 +1156,33 @@ class MockOrcaHand(OrcaHand):
     port is opened and motor state is simulated in memory.
     """
 
-    def _create_motor_client(self) -> MotorClient:
-        from .hardware.mock_dynamixel_client import MockDynamixelClient
+    # def _create_motor_client(self) -> MotorClient:
+    #     from .hardware.mock_dynamixel_client import MockDynamixelClient
+    #
+    #     return MockDynamixelClient(
+    #         self.config.motor_ids, self.config.port, self.config.baudrate
+    #     )
 
-        return MockDynamixelClient(
-            self.config.motor_ids, self.config.port, self.config.baudrate
+    def _create_motor_client(self) -> MotorClient:
+        if self.config.motor_type == "dynamixel":
+            from .hardware.dynamixel_client import DynamixelClient
+            return DynamixelClient(
+                self.config.motor_ids, self.config.port, self.config.baudrate
+            )
+
+        if self.config.motor_type == "feetech":
+            from .hardware.feetech_client import FeetechClient
+            return FeetechClient(
+                self.config.motor_ids, self.config.port, self.config.baudrate
+            )
+
+        # 添加 Waveshare 支持
+        if self.config.motor_type == "waveshare":
+            from .hardware.waveshare_client import WaveshareClient
+            return WaveshareClient(
+                self.config.motor_ids, self.config.port, self.config.baudrate
+            )
+
+        raise ValueError(
+            f"Unknown motor_type: {self.config.motor_type}. Expected one of ['dynamixel', 'feetech', 'waveshare']."
         )
