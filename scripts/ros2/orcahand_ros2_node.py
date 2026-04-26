@@ -127,11 +127,6 @@ def _create_mock_hand(config_path: Optional[str] = None) -> OrcaHand:
     _install_fake_dynamixel_sdk()
     from orca_core.hardware.mock_dynamixel_client import MockDynamixelClient
 
-    if config_path is None:
-        config_path = str(
-            _PROJECT_ROOT / "orca_core" / "models" / "v1" / "orcahand_right" / "config.yaml"
-        )
-
     hand = OrcaHand(config_path=config_path)
 
     # Monkey-patch to return MockDynamixelClient instead of real hardware
@@ -149,6 +144,8 @@ def _create_mock_hand(config_path: Optional[str] = None) -> OrcaHand:
 # ===========================================================================
 
 class _CommandKind(enum.Enum):
+    CONNECT = "connect"
+    DISCONNECT = "disconnect"
     SET_JOINT_POS = "set_joint_pos"
     ENABLE_TORQUE = "enable_torque"
     DISABLE_TORQUE = "disable_torque"
@@ -265,6 +262,8 @@ class OrcaHandWorker:
 
     def _dispatch(self, cmd: _Command) -> Any:
         handler = {
+            _CommandKind.CONNECT: self._do_connect,
+            _CommandKind.DISCONNECT: self._do_disconnect,
             _CommandKind.SET_JOINT_POS: self._do_set_joint_pos,
             _CommandKind.ENABLE_TORQUE: self._do_enable_torque,
             _CommandKind.DISABLE_TORQUE: self._do_disable_torque,
@@ -477,7 +476,7 @@ if _HAS_RCLPY:
 
         def _on_connect(self, request, response):
             try:
-                ok, msg = self._worker._do_connect({})
+                ok, msg = self._worker.submit(_CommandKind.CONNECT, timeout=30.0)
                 response.success = ok
                 response.message = msg
             except Exception as exc:
@@ -487,7 +486,7 @@ if _HAS_RCLPY:
 
         def _on_disconnect(self, request, response):
             try:
-                ok, msg = self._worker._do_disconnect({})
+                ok, msg = self._worker.submit(_CommandKind.DISCONNECT, timeout=10.0)
                 response.success = ok
                 response.message = msg
             except Exception as exc:
@@ -543,7 +542,7 @@ if _HAS_RCLPY:
             # Best-effort disconnect
             try:
                 if self._worker.is_connected():
-                    self._worker._do_disconnect({})
+                    self._worker.submit(_CommandKind.DISCONNECT, block=False)
             except Exception:
                 pass
             super().destroy_node()

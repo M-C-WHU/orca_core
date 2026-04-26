@@ -62,33 +62,146 @@ This will:
 4. Run a sinusoidal joint motion sequence
 5. Test all service-like operations
 
-### With ROS2 (Real Deployment)
+#### With Real Hardware (No ROS2)
 
-1. **Install ROS2** (Humble, Jazzy, or Rolling):
+To test the demo with a physical ORCA hand connected via serial:
+
+```bash
+uv run python scripts/ros2/orcahand_ros2_demo.py --hardware --port /dev/ttyACM0 --duration 5
+```
+
+This will:
+1. Create a real OrcaHand instance (not a mock)
+2. Connect to the hand on the specified serial port
+3. Run the same command sequence (init → sinusoidal motion → neutral → disconnect)
+
+**Note:** You may need to add your user to the `uucp` (or `dialout`) group for serial port access:
+```bash
+sudo usermod -aG uucp $USER
+# Log out and back in for group changes to take effect
+```
+
+### With ROS2 via Docker (Arch Linux / Any Linux Without Native ROS2)
+
+This is the recommended approach on Arch Linux, where ROS2 packages are not available in the official repos.
+
+1. **Install Docker and configure Chinese mirror** (if in China):
    ```bash
-   # Ubuntu example
+   # Install Docker
+   sudo pacman -S docker
+   sudo systemctl enable --now docker
+   sudo usermod -aG docker $USER  # re-login after this
+
+   # Optional: configure Docker mirror for faster pulls in China
+   sudo mkdir -p /etc/docker
+   cat | sudo tee /etc/docker/daemon.json << 'EOF'
+   {
+     "registry-mirrors": [
+       "https://docker.1ms.run",
+       "https://docker.xuanyuan.me"
+     ]
+   }
+   EOF
+   sudo systemctl restart docker
+   ```
+
+2. **Create a colcon workspace and copy the ROS2 package** (symlinks don't resolve inside the container):
+   ```bash
+   mkdir -p ~/ros2_ws/src
+   cp -r /path/to/orca_core/scripts/ros2 ~/ros2_ws/src/orcahand_ros2
+   ```
+
+3. **Build the package** inside a ROS2 Jazzy container:
+   ```bash
+   docker pull osrf/ros:jazzy-desktop-full
+   docker run --rm \
+     -v ~/ros2_ws:/home/user/ros2_ws \
+     -v /path/to/orca_core:/home/user/orca_core \
+     osrf/ros:jazzy-desktop-full \
+     bash -c "
+       cd /home/user/ros2_ws && \
+       source /opt/ros/jazzy/setup.bash && \
+       colcon build --packages-select orcahand_ros2
+     "
+   ```
+
+4. **Run the ROS2 node** with serial passthrough and TTY allocation:
+   ```bash
+   # Install python3-serial inside container, then start the node
+   docker run --rm -it \
+     --name orcahand_node \
+     --network host \
+     -v ~/ros2_ws:/home/user/ros2_ws \
+     -v /path/to/orca_core:/home/user/orca_core \
+     -v /dev/ttyACM0:/dev/ttyACM0 \
+     osrf/ros:jazzy-desktop-full \
+     bash -c "
+       apt-get update -qq && apt-get install -y -qq python3-serial && \
+       source /opt/ros/jazzy/setup.bash && \
+       export PYTHONPATH=/home/user/orca_core:\$PYTHONPATH && \
+       cd /home/user/ros2_ws/src/orcahand_ros2 && \
+       exec python3 orcahand_ros2_node.py --ros-args \
+         -p config_path:=/home/user/orca_core/orca_core/models/v2/orcahand_right/config.yaml \
+         -p publish_rate_hz:=30.0
+     "
+   ```
+
+   > **Note:** The node is run directly via `python3` (not `ros2 run`) because the package lacks a proper Python `__init__.py`, so colcon doesn't install the module as an importable package. `PYTHONPATH` must include the `orca_core` root so that `from orca_core import OrcaHand` works.
+
+5. **In another terminal**, interact with the running node via ROS2 CLI:
+   ```bash
+   # Allocate a TTY to avoid "setupterm" errors from the serial library
+   docker exec -it orcahand_node bash -c '
+     source /opt/ros/jazzy/setup.bash
+
+     # Connect to the hand
+     ros2 service call /orcahand/connect std_srvs/srv/Trigger "{}"
+
+     # Enable torque
+     ros2 service call /orcahand/enable_torque std_srvs/srv/SetBool "{data: true}"
+
+     # Send fully open positions (all joints to max extension, in radians)
+     ros2 topic pub --once /orcahand/joint_commands sensor_msgs/msg/JointState \
+       "{name: [\"wrist\", \"thumb_cmc\", \"thumb_abd\", \"thumb_mcp\", \"thumb_dip\", \"index_abd\", \"index_mcp\", \"index_pip\", \"middle_abd\", \"middle_mcp\", \"middle_pip\", \"ring_abd\", \"ring_mcp\", \"ring_pip\", \"pinky_abd\", \"pinky_mcp\", \"pinky_pip\"], position: [0.611, 0.576, 0.960, 1.571, 1.869, 0.436, 1.745, 1.869, 0.471, 1.745, 1.869, 0.471, 1.745, 1.869, 0.524, 1.745, 1.869]}"
+
+     # Read joint states
+     ros2 topic echo /orcahand/joint_states
+   '
+   ```
+
+   > **Note:** The `-it` flag for `docker exec` is required because OrcaHand's serial library uses terminal capabilities internally, which requires a TTY.
+
+### With ROS2 (Ubuntu / Native Installation)
+
+If you have a native ROS2 installation (Ubuntu/Debian with `apt`), use the standard workflow:
+
+1. **Ensure ROS2 is installed**:
+   ```bash
    sudo apt install ros-jazzy-desktop
    source /opt/ros/jazzy/setup.bash
    ```
 
-2. **Create a colcon workspace** and copy/symlink this package:
+2. **Create a colcon workspace** and copy this package:
    ```bash
    mkdir -p ~/ros2_ws/src
-   ln -s /path/to/orca_core/scripts/ros2 ~/ros2_ws/src/orcahand_ros2
+   cp -r /path/to/orca_core/scripts/ros2 ~/ros2_ws/src/orcahand_ros2
    cd ~/ros2_ws
    colcon build --packages-select orcahand_ros2
    source install/setup.bash
    ```
 
-3. **Run the node**:
+3. **Run the node directly** (use `python3`, not `ros2 run`):
    ```bash
-   ros2 run orcahand_ros2 orcahand_node --ros-args \
-       -p config_path:=/path/to/config.yaml \
+   export PYTHONPATH=/path/to/orca_core:$PYTHONPATH
+   python3 ~/ros2_ws/src/orcahand_ros2/orcahand_ros2_node.py --ros-args \
+       -p config_path:=/path/to/orca_core/orca_core/models/v2/orcahand_right/config.yaml \
        -p publish_rate_hz:=30.0
    ```
 
-4. **In another terminal**, interact:
+4. **In another terminal**, interact via standard ROS2 CLI:
    ```bash
+   source /opt/ros/jazzy/setup.bash
+
    # Read joint states
    ros2 topic echo /orcahand/joint_states
 
@@ -111,8 +224,11 @@ This will:
 For testing within a ROS2 graph without a real hand:
 
 ```bash
-ros2 run orcahand_ros2 orcahand_node --ros-args -p mock:=true
+python3 orcahand_ros2_node.py --ros-args -p mock:=true
 ```
+
+> **Why `python3` instead of `ros2 run`?**
+> The ROS2 package does not contain a Python `__init__.py`, so `find_packages()` in `setup.py` finds nothing. Colcon only installs the egg-info metadata without the actual module files. Running via `python3` with the correct `PYTHONPATH` is the reliable workaround. To fix this properly, add `__init__.py` to the package directory or change `find_packages()` to use `py_modules` instead.
 
 ## Topics
 

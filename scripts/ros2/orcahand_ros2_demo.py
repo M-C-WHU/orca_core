@@ -49,11 +49,6 @@ def create_mock_hand(config_path: Optional[str] = None) -> OrcaHand:
     """
     _install_fake_dynamixel_sdk()
 
-    if config_path is None:
-        config_path = str(
-            _PROJECT_ROOT / "orca_core" / "models" / "v1" / "orcahand_right" / "config.yaml"
-        )
-
     hand = OrcaHand(config_path=config_path)
 
     # Monkey-patch to return our mock client instead of a real one
@@ -209,6 +204,8 @@ class MessageBus:
 # ===========================================================================
 
 class _CommandKind:
+    CONNECT = "connect"
+    DISCONNECT = "disconnect"
     SET_JOINT_POS = "set_joint_pos"
     ENABLE_TORQUE = "enable_torque"
     DISABLE_TORQUE = "disable_torque"
@@ -305,7 +302,11 @@ class DemoWorker:
     def _dispatch(self, cmd: _Command) -> Any:
         kind = cmd.kind
         kw = cmd.kwargs
-        if kind == _CommandKind.SET_JOINT_POS:
+        if kind == _CommandKind.CONNECT:
+            return self._hand.connect()
+        elif kind == _CommandKind.DISCONNECT:
+            return self._hand.disconnect()
+        elif kind == _CommandKind.SET_JOINT_POS:
             jp = OrcaJointPositions.from_dict(kw["positions"])
             num_steps = kw.get("num_steps", 1)
             step_size = kw.get("step_size", 1e-2)
@@ -427,19 +428,24 @@ class SimulatedROS2Environment:
 # Demo sequence
 # ===========================================================================
 
-def run_demo(config_path: Optional[str], rate_hz: float, duration: float):
+def run_demo(config_path: Optional[str], rate_hz: float, duration: float,
+            hardware: bool = False, port: Optional[str] = None):
     print("=" * 60)
     print("OrcaHand ROS2 Translation Layer — Standalone Demo")
     print("=" * 60)
     print()
-    print("This demo uses a MockDynamixelClient (no real hardware needed).")
-    print("It validates the same OrcaHandWorker + message bus that the")
-    print("real ROS2 node uses, but without requiring rclpy.")
-    print()
 
-    # 1. Create mock hand
-    print("[1] Creating OrcaHand with MockDynamixelClient...")
-    hand = create_mock_hand(config_path)
+    # 1. Create hand
+    if hardware:
+        print("[1] Creating OrcaHand for REAL HARDWARE...")
+        hand = OrcaHand(config_path=config_path)
+        if port is not None:
+            import dataclasses
+            hand.config = dataclasses.replace(hand.config, port=port)
+            print(f"    Port overridden to: {port}")
+    else:
+        print("[1] Creating OrcaHand with MockDynamixelClient (simulated hardware)...")
+        hand = create_mock_hand(config_path)
     print(f"    Joint names: {list(hand.config.joint_ids)}")
     print(f"    Connected: {hand.is_connected()}")
     print()
@@ -457,9 +463,28 @@ def run_demo(config_path: Optional[str], rate_hz: float, duration: float):
     print()
 
     # 4. Connect
-    print("[4] Connecting to hand (via mock client)...")
-    ok, msg = hand.connect()
+    if hardware:
+        print("[4] Connecting to real hand on the serial bus...")
+    else:
+        print("[4] Connecting to hand (via mock client)...")
+    try:
+        ok, msg = worker.submit(_CommandKind.CONNECT, timeout=60.0)
+    except Exception as exc:
+        # connect() may try to open an interactive port picker (curses)
+        # which fails outside a terminal. Surface the error clearly.
+        print(f"    connect() failed: {exc}")
+        if hardware and 'Permission denied' in str(exc):
+            print("    HINT: You may need to add your user to the uucp/dialout group:")
+            print("      sudo usermod -aG uucp $USER")
+            print("      Then log out and back in, or run: newgrp uucp")
+        print("    Aborting.")
+        worker.stop()
+        return
     print(f"    connect() → success={ok}, message={msg}")
+    if not ok:
+        print("    ERROR: Connection failed. Aborting.")
+        worker.stop()
+        return
     print()
 
     # 5. Initialize joints
@@ -552,10 +577,10 @@ def run_demo(config_path: Optional[str], rate_hz: float, duration: float):
     # 11. Disconnect and shutdown
     print("[11] /orcahand/disconnect [Trigger]...")
     try:
-        hand.stop_task()
+        worker.submit(_CommandKind.STOP_TASK, block=False)
     except Exception:
         pass
-    ok, msg = hand.disconnect()
+    ok, msg = worker.submit(_CommandKind.DISCONNECT, timeout=10.0)
     print(f"     disconnect() → success={ok}, message={msg}")
     print()
 
@@ -577,14 +602,16 @@ def run_demo(config_path: Optional[str], rate_hz: float, duration: float):
     print("  3. Build this package in a colcon workspace")
     print("  4. Run: ros2 run orcahand_ros2 orcahand_node")
     print("  5. In another terminal: ros2 topic echo /orcahand/joint_states")
+    print()
+    print("To test with real hardware (without ROS2):")
+    print("  python scripts/ros2/orcahand_ros2_demo.py --hardware --port /dev/ttyACM0")
     print("=" * 60)
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Standalone demo for the OrcaHand ROS2 translation layer. "
-                    "No ROS2 installation required — uses mock hardware and "
-                    "simulated pub/sub messaging."
+                    "Uses mock hardware by default. Pass --hardware to use a real hand."
     )
     parser.add_argument(
         "--config-path", type=str, default=None,
@@ -598,9 +625,20 @@ def main():
         "--duration", type=float, default=5.0,
         help="Duration of the command-sending phase in seconds (default: 5)."
     )
+    parser.add_argument(
+        "--hardware", action="store_true", default=False,
+        help="Use real hardware instead of mock client. The hand must be "
+             "connected (e.g. /dev/ttyACM0)."
+    )
+    parser.add_argument(
+        "--port", type=str, default=None,
+        help="Serial port for the real hand (e.g. /dev/ttyACM0). "
+             "Overrides the port in config.yaml. Only used with --hardware."
+    )
     args = parser.parse_args()
 
-    run_demo(args.config_path, args.rate, args.duration)
+    run_demo(args.config_path, args.rate, args.duration,
+             hardware=args.hardware, port=args.port)
 
 
 if __name__ == "__main__":
