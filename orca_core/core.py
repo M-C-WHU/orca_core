@@ -8,4 +8,4 @@
 
 from .base_hand import BaseHand
 from .hardware_hand import OrcaHand
-from .joint_position import OrcaJointPosition
+from .joint_position import OrcaJointPositions

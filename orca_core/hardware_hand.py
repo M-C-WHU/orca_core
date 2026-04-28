@@ -105,7 +105,9 @@ class OrcaHand(BaseHand):
         self.is_calibrated(verbose=True)
 
     def __del__(self):
-        self.disconnect()
+        # 【修复】防止 __init__ 失败后，垃圾回收时调用不存在的属性而抛出 AttributeError
+        if getattr(self, '_motor_client', None) is not None:
+            self.disconnect()
 
     # ------------------------------------------------------------------
     # Calibration state — thin views onto self.calibration
@@ -272,6 +274,7 @@ class OrcaHand(BaseHand):
 
             with self._motor_lock:
                 self._motor_client.write_desired_current(self.config.motor_ids, current)
+            return  # 【修复】必须添加 return，防止继续执行下方的广播乘法导致 numpy 崩溃
 
         with self._motor_lock:
             self._motor_client.write_desired_current(
@@ -299,30 +302,33 @@ class OrcaHand(BaseHand):
         if mode_value is None:
             raise ValueError("Invalid control mode.")
 
+        # 【修复】将锁的范围扩大到包含底层的硬件通信，以防止多线程抢占总线
         with self._motor_lock:
             if motor_ids is None:
                 motor_ids = self.config.motor_ids
             elif not all(motor_id in self.config.motor_ids for motor_id in motor_ids):
                 raise ValueError("Invalid motor IDs.")
 
-        if mode_value in (MODE_MAP[CURRENT_BASED_POSITION], MODE_MAP[CURRENT]):
-            wrist_motor_id = self.config.joint_to_motor_map.get("wrist")
-            if wrist_motor_id is not None:
-                motor_ids_without_wrist = [
-                    motor_id for motor_id in motor_ids if motor_id != wrist_motor_id
-                ]
-                self._motor_client.set_operating_mode(
-                    motor_ids_without_wrist, mode_value
-                )
+            if mode_value in (MODE_MAP[CURRENT_BASED_POSITION], MODE_MAP[CURRENT]):
+                wrist_motor_id = self.config.joint_to_motor_map.get("wrist")
+                if wrist_motor_id is not None:
+                    motor_ids_without_wrist = [
+                        motor_id for motor_id in motor_ids if motor_id != wrist_motor_id
+                    ]
+                    # 安全检查，防止空列表调用
+                    if motor_ids_without_wrist:
+                        self._motor_client.set_operating_mode(
+                            motor_ids_without_wrist, mode_value
+                        )
 
-                if wrist_motor_id in motor_ids:
-                    self._motor_client.set_operating_mode(
-                        [wrist_motor_id], WRIST_MODE_VALUE
-                    )
+                    if wrist_motor_id in motor_ids:
+                        self._motor_client.set_operating_mode(
+                            [wrist_motor_id], WRIST_MODE_VALUE
+                        )
 
-                return
+                    return
 
-        self._motor_client.set_operating_mode(motor_ids, mode_value)
+            self._motor_client.set_operating_mode(motor_ids, mode_value)
 
     def get_motor_pos(self, as_dict: bool = False) -> Union[np.ndarray, dict]:
         """Read raw motor positions from the bus.

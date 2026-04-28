@@ -75,6 +75,8 @@ class BaseHand(ABC):
         """Apply a joint-space command. Return ``True`` if the command was applied."""
         pass
 
+    
+
     def _coerce_joint_positions(
         self,
         joint_pos: OrcaJointPositions | dict[str, float | None] | np.ndarray,

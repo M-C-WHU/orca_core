@@ -225,7 +225,8 @@ class OrcaHandConfig(BaseHandConfig):
             resolved_config_path, calibration_path
         )
 
-        config = read_yaml(resolved_config_path)  # {} when file is not found
+        # 【修复】加入 or {}，防止 read_yaml 返回 None 时在下一行抛出 TypeError
+        config = read_yaml(resolved_config_path) or {}  
 
         kwargs = {"config_path": resolved_config_path, "calibration_path": resolved_calibration_path}
 
